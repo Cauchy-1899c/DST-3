@@ -1,0 +1,57 @@
+---
+title: "preProc"
+author: "Cauchy"
+date: "2019/12/15"
+output: html_document
+---
+
+```{r}
+# read data and column names from file
+kddata=read.csv("../data/kddcup.data_10_percent.gz", as.is = T)
+names=read.table("../data/kddcup.names", skip = 1, sep = ":", as.is = T)
+colnames(kddata)=c(names[,1], "normal")
+```
+
+```{r}
+# create a function that gathers labels into "other" label
+comb <- function(data, col, threshold){
+  stab=table(data[col])
+  data[data[,col] %in% names(stab[stab<threshold]), col] = "other" # change the label to "other" if the number is less than threshold
+  data # return changed data
+}
+```
+
+
+```{r}
+# cluster the "service" feature into 7 parts
+kddata = comb(data=kddata, col="service", threshold=4000)
+table(kddata$service)
+```
+
+```{r}
+# cluster the "normal" feature into 4 parts
+kddata = comb(kddata, "normal", 4000)
+table(kddata$normal)
+```
+
+```{r}
+# preprocess on the data
+library(caret)
+dc = nzv(kddata) # find features with small variance or with a dominant value
+kdd_bin_DV <- kddata[,-dc] # remove them
+```
+
+```{r}
+# Filter out all factor variables
+chars <- names(kdd_bin_DV)[sapply(kdd_bin_DV, class) == 'character'] # find features with "character" class
+formula <- as.formula(paste('~', paste(chars, collapse = '+')))
+dummy <- dummyVars(formula = formula, data = kdd_bin_DV) 
+pred <- data.frame(predict(dummy, newdata = kdd_bin_DV)) # one-hot encode these features
+kdd_bin_DV <- cbind(kdd_bin_DV[,4:11],pred) # combine the one-hot encoding with original data frame
+```
+
+```{r}
+# write out to a .csv file
+write.table(kdd_bin_DV, "D:/Study/2019-20/Bristol/Homeworks/DST/Assessment2_Kexi_Huang/dstdata.csv", sep=",", row.names = FALSE)
+```
+

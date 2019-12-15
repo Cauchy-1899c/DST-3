@@ -21,13 +21,9 @@ Data Science Toolbox Project 3
 
 ##### 朴素贝叶斯 (Naive Bayes, 蒙哥)
 
-##### 
 
-### 优化模型
+### 比较方法
 
-### 最优模型预测 (分类, Classification)
-
-### 模型比较
-
-
+* ROC曲线（四元分类器，无法在一个图中展示）
+* Confusion Matrix
 

@@ -26,4 +26,5 @@ Data Science Toolbox Project 3
 
 * ROC曲线（四元分类器，无法在一个图中展示）
 * Confusion Matrix
+* 由于false positive的代价远比false negative的代价高，我们考虑采用FPR(False Positive Rate)作为性能度量
 

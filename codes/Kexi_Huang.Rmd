@@ -1,0 +1,92 @@
+---
+title: "DST_3"
+author: "Cauchy"
+date: "2019/12/11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+```{r}
+warnings("off")
+# read the preprocessed data set
+kdd_bin_DV = read.csv("D:/Study/2019-20/Bristol/Homeworks/DST/Assessment2_Kexi_Huang/dstdata.csv", sep = ",")
+library("RSNNS")
+library("reshape")
+library("caret")
+```
+
+```{r}
+# shuffle the data set and split it into train set and test set
+set1=sample(1:dim(kdd_bin_DV)[1],floor(dim(kdd_bin_DV)[1]/2)) # choose a half without replecement
+train = kdd_bin_DV[set1, ]
+test = kdd_bin_DV[-set1, ]
+```
+
+```{r}
+# normalize features which are not encoded from categoric features
+preProc <- preProcess(train[,1:7], method="range")
+train[,1:7] <- predict(preProc, train[,1:7])
+test[,1:7] <- predict(preProc, test[1:7])
+summary(test)
+```
+
+```{r}
+# train the Malti-Layer Perceptron model
+mlpmodel_1 <- mlp(x=train[,1:29], y = train[,30:33], size=10) # 30:33 are features encoded from "normal", and 10 is the number of hidden layers
+testpred=predict(mlpmodel_1, test[, 1:29]) # predict in the test set
+testres=data.frame(truth=test[,30:33], pred=testpred) # combine the prediction and the truth into 1 data frame
+summary(testres)
+```
+
+```{r}
+# for each row, let the largest prediction be 1, others be 0
+for(i in 1:dim(testpred)[1]){
+  testpred[i, which.max(testpred[i, 1:4])] = 1
+  testpred[i, -which.max(testpred[i, 1:4])] = c(0, 0, 0)
+}
+```
+
+```{r}
+# write a function to decode the one-hot encoding for "normal" feature
+decode <- function(x){
+  result = rep(0, dim(x)[1])
+  for(i in 1:dim(x)[1]){
+    # if (1,0,0,0), then "neptune"
+    if(x[i,1] == 1){
+      result[i]="neptune"
+    }
+    # if (0,1,0,0), then "normal"
+      else if(x[i,2] == 1){
+      result[i]="normal"
+      }
+    # if (0,0,1,0), then "other"
+      else if(x[i,3] == 1){
+      result[i]="other"
+      }
+    # if (0,0,0,1), then "smurf"
+      else if(x[i,4] == 1){
+      result[i]="smurf"
+      }
+  }
+  result
+}
+```
+
+```{r}
+# combine the results and the labels in the same data frame
+testres=data.frame(truth=test[,30:33], truth_label=decode(test[,30:33]), pred=testpred, pred_label=decode(testpred))
+```
+
+```{r}
+# compute the confusion matrix
+cm = caret::confusionMatrix(table(testres$truth_label, testres$pred_label))
+print(cm)
+```
+

@@ -1,0 +1,144 @@
+---
+title: "DST3"
+author: "Haimeng Lu"
+date: "2019Äê12ÔÂ15ÈÕ"
+output: html_document
+---
+1. Some libraries
+
+```{r}
+library(forcats)#Use the function 'fct_lump' to lump together least common factor levels into "other" 
+library(tidyverse)
+library(klaR)#It contains function to compute the NaiveBayes model
+library(fastNaiveBayes)#Another package which seems to run faster
+library(Matrix)
+library(quanteda)#use multinomial distribution
+library(caret)#The confusionMatrix
+library(rpart)#The decision tree
+```
+
+2.Data preprocession
+
+We want to deal with the character or factor variables this time so we try the dummy variables. If there are too much levels, we lump together the least levels into 'other'.
+
+2.1 Read the data and change the character variables into factor variables.
+
+```{r}
+setwd("C:/Users/haimeng/Desktop/Bristol/cybersecurity/Data Science Toolbox/DST 3")
+data0 = read.csv("kddcup.data_10_percent (2).gz" , header = TRUE)
+kddnames = read.table("kddcup (1).names",sep = ":",skip = 1,as.is = T)
+colnames(data0) = c(kddnames[,1],"normal")
+Sys.setlocale('LC_ALL','C')#use it to clear the annoying 'Warning message:In strsplit(x, "\n") : input string 1 is invalid in this locale'
+attach(data0)
+protocol_type_T = as.factor(protocol_type)
+service_T = as.factor(service)
+flag_T = as.factor(flag)
+normal_T = as.factor(normal)#4 character variables
+detach(data0)
+
+```
+
+2.2 Get together the levels of a low weight. Since as many levels as possible should be reserved in this project, the level "other" can be less common than all levels that were reserved.
+
+```{r}
+normal = as.factor(fct_lump(normal_T,3))
+table(normal)
+
+protocol_type = protocol_type_T
+table(protocol_type_T)#There are all 3 levels in 'protocol_type' and each of them makes up a non-negligible proportion of the dataset
+
+service = fct_lump(service_T,5)
+table(service)
+
+flag = fct_lump(flag_T,3)
+table(flag)
+```
+
+2.3 Create the dummy variables.
+
+```{r}
+dummyN = model.matrix(~normal)#In this way a factor variable is divided into n 0-1 variables.(n is number of the  levels of the factor variable)
+dummyn = dummyN[,-1]#We should delete one column to prevent the colinearity.
+
+dummyP = model.matrix(~protocol_type)
+dummyp = dummyP[,-1]
+
+dummyS = model.matrix(~service)
+dummys = dummyS[,-1]
+
+dummyF = model.matrix(~flag)
+dummyf = dummyF[,-1]
+```
+
+2.3 Create the training set and testing set. 
+The variables that are mostly consist of 0 should be deleted because they can be all-0 variables in the training set.There are many ways to narrow down the variables. A criterion based on variance is preferred in this project.
+
+```{r}
+data_var = as.data.frame(t(apply(data0[,-c(2,3,4)],2,var)))
+#Calculate the variances of all variables
+data_tmp = rbind.data.frame(data0[,-c(2,3,4)],data_var)
+#And then add the variance to the tail of dataset
+data1_T = data_tmp[,which(data_var>0.5)]
+#Select the variables whose variance larger than 0.5 
+data1_T = data1_T[-length(data_tmp),]
+#Delete the row of variances. 
+data1 = cbind(data1_T,dummyp,dummys,dummyf,normal)
+#Conbine the selected numeric variables with the dummy variables. 
+```
+
+Choose a 70% training set and 30% testing set. 
+
+```{r}
+data1 = data1 %>% mutate(id = row_number())
+train = data1 %>% sample_frac(.70)
+test = anti_join(data1, train,by="id")
+data1 = data1[,-22]
+test = test[,-22]
+train = train[,-22]
+train0 = cbind(as.data.frame((train[,-c(21)])),train$normal)
+trainy = train0$`train$normal`
+```
+
+3.Apply the model
+
+3.1 Try the naiveBayes classifier. It is an ancient algorithm so that it takes a long time to run the code.
+
+```{r}
+
+NBmodel = klaR::NaiveBayes(train0$`train$normal`~.,train0,usekernel = T,fL = 1)
+NBpre = predict(NBmodel,test[,-21],type = "class")
+table(NBpre$class)
+confusionMatrix(test[,21],NBpre$class)
+
+```
+
+The accurance is high. However, most of the modern algorithm has a higher accurancy and less running time than NaiveBayes algorithm. The assumption of Naivebayes Classifier that all of the variables are uncorrelated can be one of the explanation for the result.
+
+3.2 Try another algorithm provided by a new package. It can use different prior distributions and it uses much less time.
+```{r}
+train2 = train0
+train2_mat = as.matrix(train2[,-21])
+trainy2 = as.factor(ifelse(trainy=='normal.','normal.','non-normal.'))#This algorithm only have a high accurance for 0-1 classifier.
+test2 = as.factor(ifelse(test[,21]=='normal.','normal.','non-normal.'))
+NBmodel2 = fnb.gaussian(train2_mat, trainy2, laplace = 0)#Assume a Gaussion distribution as the priordistribution
+NBmodel3 = fnb.multinomial(train2_mat, trainy2, laplace = 0)#Assume a multinomial distribution as the prior distribution
+NBpre2 = predict(NBmodel2,test[,-21],type = "class",sparse = FALSE, threshold = .Machine$double.eps,
+  check = TRUE)
+table(NBpre2)
+confusionMatrix(test2,NBpre2)
+NBpre3 = predict(NBmodel3,test[,-21],type = "class",sparse = FALSE, threshold = .Machine$double.eps,
+  check = TRUE)
+table(NBpre3)
+confusionMatrix(test2,NBpre3)
+
+```
+
+This algorithm have a much lower accurancy than naiveBayes classifier and other classifiers. However it runs very fast, It can be useful when people must deal with a much larger dataset.
+
+3.3 Baseline
+```{r}
+fit = rpart(train0$`train$normal`~.,data=train0, method = 'class')
+model3 = predict(fit, test, type = 'class')
+confusionMatrix(as.factor(test[,21]), as.factor(model3))
+```
+

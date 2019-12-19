@@ -1,0 +1,449 @@
+---
+title: "GBM"
+author: "Keyu Long"
+date: "12/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
+title: "GBM"
+author: "Keyu Long"
+date: "11/18/2019"
+output: html_document
+---
+First of all, library the package we need.
+```{r}
+library(data.table)
+library(dplyr)
+library(stats)
+library(ggplot2)
+library(tidyverse)
+require(purrr)
+require(readr)
+library(DataExplorer)
+require(scales)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(corrplot)
+library(caret)
+library(gbm)
+```
+
+
+Load the data that has been processed.
+```{R}
+kddata_bin_DV <- fread("/Users/longkeyu/Desktop/Bristol/DataScienceToolbox/assessment3/dstdata.csv")
+summary(kddata_bin_DV)
+```
+
+divide the dataset into train set and test set.
+```{r}
+#give dataset the row number in order to seperate
+kddata_bin_DV <- kddata_bin_DV %>% mutate(id=row_number())
+
+data_train <-  kddata_bin_DV %>% sample_frac(.70) #the percentage of the train set
+
+data_test=anti_join(kddata_bin_DV, data_train, by = 'id') #rest of the data mades the test set 
+
+data_train=data_train[,-length(data_train)]#delete the id
+
+data_test=data_test[,-length(data_test)]#delete the id
+```
+
+delete the factor that will influence the result
+```{R}
+#delete the factor influence normal
+data_train_normal=data_train[,-c(30,32,33)]
+data_test_normal=data_test[,-c(30,32,33)]
+
+#delete the factor influence neptune
+data_train_neptune=data_train[,-(31:33)]
+data_test_neptune=data_test[,-(31:33)]
+
+#delete the factor influence smurf
+data_train_smurf=data_train[,-(30:32)]
+data_test_smurf=data_test[,-(30:32)]
+
+#delete the factor influence other
+data_train_other=data_train[,-c(30,31,33)]
+data_test_other=data_test[,-c(30,31,33)]
+```
+
+
+train the data and print the model object,then summary it to see the result
+```{R}
+# Train a 10000-tree GBM model
+set.seed(1)
+#using gbm to train result about normal
+data_model_normal <- gbm(formula = normalnormal. ~ ., 
+                    data = data_train_normal,
+                    n.trees = 1000,
+                    distribution="bernoulli",
+                  verbose=FALSE)
+
+#using gbm to train result about neptune
+data_model_neptune <- gbm(formula = normalneptune. ~ ., 
+                    data = data_train_neptune,
+                    n.trees = 1000,
+                    distribution="bernoulli",
+                  verbose=FALSE)
+
+#using gbm to train result about smurf
+data_model_smurf <- gbm(formula = normalsmurf. ~ ., 
+                    data = data_train_smurf,
+                    n.trees = 1000,
+                    distribution="bernoulli",
+                  verbose=FALSE)
+
+#using gbm to train result about other
+data_model_other <- gbm(formula = normalother ~ ., 
+                    data = data_train_other,
+                    n.trees = 1000,
+                    distribution="bernoulli",
+                  verbose=FALSE)
+
+# Print the model object                    
+print(data_model_normal) #normal
+print(data_model_neptune) #neptune
+print(data_model_smurf) #smurf
+print(data_model_other) #other
+
+# summary() prints variable importance
+summary(data_model_normal) #normal
+summary(data_model_neptune) #neptune
+summary(data_model_smurf) #smurf
+summary(data_model_other) #other
+```
+
+From the above graph, we can see the relative influence of the features to the graph.
+count,src_bytes and logged_in influence the normal part most.
+src_bytes,service of private and flag of SF influence of neptune part most.
+srv_count, service of ecr_i, src_bytes and count influence of the smurf part most.
+src_bytes, service of other and flag of RSTR influence of the other part most.
+
+
+Prediction using a GBM model
+```{R}
+# Generate predictions of normal on the test set
+preds_normal <- predict(object = data_model_normal, 
+                  newdata = data_test,
+                  n.trees = 1000)
+
+# Generate predictions of neptune on the test set
+preds_neptune <- predict(object = data_model_neptune, 
+                  newdata = data_test,
+                  n.trees = 1000)
+
+# Generate predictions of smurf on the test set
+preds_smurf <- predict(object = data_model_smurf, 
+                  newdata = data_test,
+                  n.trees = 1000)
+
+# Generate predictions of other on the test set
+preds_other <- predict(object = data_model_other, 
+                  newdata = data_test,
+                  n.trees = 1000)
+
+# Compare the range of the four sets of predictions
+range(preds_normal) #normal
+range(preds_neptune) #neptune
+range(preds_smurf) #smurf
+range(preds_other) #other
+```
+
+Evaluate test set AUC,I feel suprised about the result. As I know, gbm will perform bad if we do not tune it.But the result shows that the accuracy is pretty good. 
+```{R}
+#in order to calculate auc
+library(Metrics)
+
+auc(actual = data_test_normal$normalnormal., predicted = preds_normal)#normal 
+auc(actual = data_test_neptune$normalneptune., predicted = preds_neptune) #neptune 
+auc(actual = data_test_smurf$normalsmurf., predicted = preds_smurf) #smurf
+auc(actual = data_test_other$normalother, predicted = preds_other) #other
+```
+
+Early stopping in GBMs(May spend several minutes to run this chunk)
+```{R}
+# Optimal ntree estimate about normal feature based on OOB
+ntree_opt_oob_normal <- gbm.perf(object = data_model_normal, 
+                          method = "OOB", 
+                          oobag.curve = TRUE)
+
+# Optimal ntree estimate about neptune feature based on OOB
+ntree_opt_oob_neptune <- gbm.perf(object = data_model_neptune, 
+                          method = "OOB", 
+                          oobag.curve = TRUE)
+
+# Optimal ntree estimate about smurf feature based on OOB
+ntree_opt_oob_smurf <- gbm.perf(object = data_model_smurf, 
+                          method = "OOB", 
+                          oobag.curve = TRUE)
+
+# Optimal ntree estimate about other feature based on OOB
+ntree_opt_oob_other <- gbm.perf(object = data_model_other, 
+                          method = "OOB", 
+                          oobag.curve = TRUE)
+
+
+# Train a Cross Validation of normal feature GBM model
+set.seed(1)
+data_model_cv_normal <- gbm(formula = normalnormal. ~ ., 
+                       distribution = "bernoulli", 
+                       data = data_train_normal,
+                       n.trees = 1000,
+                       cv.folds = 2)
+
+# Train a Cross Validation of neptune feature GBM model
+data_model_cv_neptune <- gbm(formula = normalneptune. ~ ., 
+                       distribution = "bernoulli", 
+                       data = data_train_neptune,
+                       n.trees = 1000,
+                       cv.folds = 2)
+
+# Train a Cross Validation of smurf feature GBM model
+data_model_cv_smurf <- gbm(formula = normalsmurf. ~ ., 
+                       distribution = "bernoulli", 
+                       data = data_train_smurf,
+                       n.trees = 1000,
+                       cv.folds = 2)
+
+# Train a Cross Validation of other feature GBM model
+data_model_cv_other <- gbm(formula = normalother ~ ., 
+                       distribution = "bernoulli", 
+                       data = data_train_other,
+                       n.trees = 1000,
+                       cv.folds = 2)
+                       
+# Optimal ntree estimate of noraml based on CV
+ntree_opt_cv_normal <- gbm.perf(object = data_model_cv_normal, 
+                         method = "cv")
+ 
+# Optimal ntree estimate of neptune based on CV                        
+ntree_opt_cv_neptune <- gbm.perf(object = data_model_cv_neptune, 
+                         method = "cv")
+
+# Optimal ntree estimate of smurf based on CV
+ntree_opt_cv_smurf <- gbm.perf(object = data_model_cv_smurf, 
+                         method = "cv")
+
+# Optimal ntree estimate of other based on CV
+ntree_opt_cv_other <- gbm.perf(object = data_model_cv_other, 
+                         method = "cv")
+
+# Compare the estimates                         
+print(paste0("Optimal n.trees (OOB Estimate): ", ntree_opt_oob_normal))                         
+print(paste0("Optimal n.trees (CV Estimate): ", ntree_opt_cv_normal))
+
+print(paste0("Optimal n.trees (OOB Estimate): ", ntree_opt_oob_smurf))                         
+print(paste0("Optimal n.trees (CV Estimate): ", ntree_opt_cv_smurf))
+
+print(paste0("Optimal n.trees (OOB Estimate): ", ntree_opt_oob_neptune))                         
+print(paste0("Optimal n.trees (CV Estimate): ", ntree_opt_cv_neptune))
+
+print(paste0("Optimal n.trees (OOB Estimate): ", ntree_opt_oob_other))                         
+print(paste0("Optimal n.trees (CV Estimate): ", ntree_opt_cv_other))
+```
+
+OOB vs CV-based early stopping
+```{R}
+library(ROCR)
+# Generate predictions on the test set of normal using ntree_opt_oob number of trees
+preds_oob_normal <- predict(object = data_model_normal, 
+                  newdata = data_test_normal,
+                  n.trees = ntree_opt_oob_normal)
+
+# Generate predictions on the test set of neptune using ntree_opt_oob number of trees
+preds_oob_neptune <- predict(object = data_model_neptune, 
+                  newdata = data_test_neptune,
+                  n.trees = ntree_opt_oob_neptune)
+
+# Generate predictions on the test set of smurf using ntree_opt_oob number of trees
+preds_oob_smurf <- predict(object = data_model_smurf, 
+                  newdata = data_test_smurf,
+                  n.trees = ntree_opt_oob_smurf)
+
+# Generate predictions on the test set of other using ntree_opt_oob number of trees
+preds_oob_other <- predict(object = data_model_other, 
+                  newdata = data_test_other,
+                  n.trees = ntree_opt_oob_other)
+
+# Generate predictions on the test set of normal feature using ntree_opt_cv number of trees
+preds_cv_normal <- predict(object = data_model_normal, 
+                  newdata = data_test_normal,
+                  n.trees = ntree_opt_cv_normal)   
+
+# Generate predictions on the test set of neptune feature using ntree_opt_cv number of trees
+preds_cv_neptune <- predict(object = data_model_neptune, 
+                  newdata = data_test_neptune,
+                  n.trees = ntree_opt_cv_neptune)   
+
+# Generate predictions on the test set of smurf feature using ntree_opt_cv number of trees
+preds_cv_smurf <- predict(object = data_model_smurf, 
+                  newdata = data_test_smurf,
+                  n.trees = ntree_opt_cv_smurf)   
+
+# Generate predictions on the test set of other feature using ntree_opt_cv number of trees
+preds_cv_other <- predict(object = data_model_other, 
+                  newdata = data_test_other,
+                  n.trees = ntree_opt_cv_other)   
+
+
+# Generate the test set AUCs using the two sets of preditions & compare
+auc_oob_normal <- auc(actual = data_test_normal$normalnormal., predicted = preds_oob_normal)  #OOB
+auc_cv_normal <- auc(actual = data_test_normal$normalnormal., predicted = preds_cv_normal)  #CV 
+
+auc_oob_neptune <- auc(actual = data_test_neptune$normalneptune., predicted = preds_oob_neptune)  #OOB
+auc_cv_neptune <- auc(actual = data_test_neptune$normalneptune., predicted = preds_cv_neptune)  #CV 
+
+auc_oob_smurf <- auc(actual = data_test_smurf$normalsmurf., predicted = preds_oob_smurf)  #OOB
+auc_cv_smurf <- auc(actual = data_test_smurf$normalsmurf., predicted = preds_cv_smurf)  #CV 
+
+auc_oob_other <- auc(actual = data_test_other$normalother, predicted = preds_oob_other)  #OOB
+auc_cv_other <- auc(actual = data_test_other$normalother, predicted = preds_cv_other)  #CV 
+
+# Compare AUC 
+#normal
+print(paste0("Test set AUC (OOB): ", auc_oob_normal))                         
+print(paste0("Test set AUC (CV): ", auc_cv_normal))
+
+#neptune
+print(paste0("Test set AUC (OOB): ", auc_oob_neptune))                         
+print(paste0("Test set AUC (CV): ", auc_cv_neptune))
+
+#smurf
+print(paste0("Test set AUC (OOB): ", auc_oob_smurf))                         
+print(paste0("Test set AUC (CV): ", auc_cv_smurf))
+
+#other
+print(paste0("Test set AUC (OOB): ", auc_oob_other))                         
+print(paste0("Test set AUC (CV): ", auc_cv_other))
+```
+
+check the result
+```{R}
+actual_normal = data_test_normal$normalnormal. #actual value
+#predict
+gbm_preds_normal <- predict(object = data_model_normal, 
+                  newdata = data_test_normal,
+                  n.trees = ntree_opt_cv_normal)
+
+gbm_auc_normal <- auc(actual = actual_normal, predicted = gbm_preds_normal) #normal
+
+
+
+actual_neptune = data_test_neptune$normalneptune. #actual value
+#predict
+gbm_preds_neptune <- predict(object = data_model_neptune, 
+                  newdata = data_test_neptune,
+                  n.trees = ntree_opt_cv_neptune)
+
+gbm_auc_neptune <- auc(actual = actual_neptune, predicted = gbm_preds_neptune) #neptune
+
+
+actual_smurf = data_test_smurf$normalsmurf. #actual value
+#predict
+gbm_preds_smurf <- predict(object = data_model_smurf, 
+                  newdata = data_test_smurf,
+                  n.trees = ntree_opt_cv_smurf)
+
+gbm_auc_smurf <- auc(actual = actual_smurf, predicted = gbm_preds_smurf) #smurf
+
+
+actual_other = data_test_other$normalother #actual value
+#predict
+gbm_preds_other <- predict(object = data_model_other, 
+                  newdata = data_test_other,
+                  n.trees = ntree_opt_cv_other)
+
+gbm_auc_other <- auc(actual = actual_other, predicted = gbm_preds_other) #other
+
+#print the result
+gbm_auc_normal
+gbm_auc_neptune
+gbm_auc_smurf
+gbm_auc_other
+```
+
+In order to show the total accuracy, we should first change the form into binary structure.
+```{R}
+#transfer the form of neptune into binary in order to calculate the total variance
+for(i in 1:length(gbm_preds_neptune)){
+  gbm_preds_neptune[i] <- ifelse(gbm_preds_neptune[i]<=0.5,0,1)
+}
+#transfer the form of normal into binary in order to calculate the total variance
+for(i in 1:length(gbm_preds_normal)){
+  gbm_preds_normal[i] <- ifelse(gbm_preds_normal[i]<=0.5,0,1)
+}
+#transfer the form of smurf into binary in order to calculate the total variance
+for(i in 1:length(gbm_preds_smurf)){
+  gbm_preds_smurf[i] <- ifelse(gbm_preds_smurf[i]<=0.5,0,1)
+}
+#transfer the form of other into binary in order to calculate the total variance
+for(i in 1:length(gbm_preds_other)){
+  gbm_preds_other[i] <- ifelse(gbm_preds_other[i]<=0.5,0,1)
+}
+```
+
+transfer the form of data into factor
+```{R}
+gbm_preds_normal=as.factor(gbm_preds_normal) #transfer data into factor
+gbm_preds_neptune=as.factor(gbm_preds_neptune) #transfer data into factor
+gbm_preds_smurf=as.factor(gbm_preds_smurf) #transfer data into factor
+gbm_preds_other=as.factor(gbm_preds_other) #transfer data into factor
+
+a_normal=as.factor(actual_normal) #transfer data into factor
+a_neptune=as.factor(actual_neptune) #transfer data into factor
+a_smurf=as.factor(actual_smurf) #transfer data into factor
+a_other=as.factor(actual_other) #transfer data into factor
+```
+
+
+bind prediction and actual data respectively
+```{R}
+a=cbind(gbm_preds_normal,gbm_preds_neptune,gbm_preds_smurf,gbm_preds_other)
+a=a-1
+b=cbind(actual_normal,actual_neptune,actual_smurf,actual_other)
+a=as.data.frame(a)
+b=as.data.frame(b)
+
+transfer=function(x){
+  v=rep(0,dim(x)[1])
+  for(i in 1:dim(x)[1]){
+    if(x[i,1]==1){
+      v[i]="normal"
+    }
+    else if(x[i,2]==1){
+      v[i]="neptune"
+    }
+    else if(x[i,3]==1){
+      v[i]="smurf"
+    }
+    else{
+      v[i]="other"
+    }
+  }
+  v
+}
+```
+
+Using function to make the data into real type
+```{R}
+#transfer the dummy variable into the actual variable
+transfered_pred <- transfer(a)
+transfered_actual <- transfer(b)
+
+#transfer that form of actual variable into factors
+transfered_actual <- as.factor(transfered_actual)
+transfered_pred <- as.factor(transfered_pred)
+```
+
+calculate the confusion matrix
+```{R}
+#transfered confusioin Matrix
+confusionMatrix(transfered_actual,transfered_pred)
+```

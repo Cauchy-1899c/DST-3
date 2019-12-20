@@ -1,0 +1,185 @@
+---
+title: "RandomForest"
+author: "Xiaomeng Jia"
+date: "08/12/2019"
+output: pdf_document
+---
+
+## 1.Load up the data
+
+```{r}
+load("C:/Users/JxmDe/Desktop/Data Science Toolbox/Project/Project 3/Submission/Xiaomeng Jia/Jia.RData")
+```
+
+```{r}
+kdd <- read.csv("C:/Users/JxmDe/Desktop/Data Science Toolbox/Project/Project 2/Submission/kddcup.data_10_percent.gz")
+kddnames = read.table("C:/Users/JxmDe/Desktop/Data Science Toolbox/Project/Project 2/Submission/kddcup.names", 
+                      sep = ":", skip=1, as.is=T)
+colnames(kdd) = c(kddnames[,1], "normal")
+```
+
+## 2.Load up the packages we need.
+
+```{r}
+library(tidyverse) # Data Wrangling and Transformation
+library(caret) # Data preprocessing and Analysis models
+library(dplyr) # Filter
+library(party)
+library(randomForest) # RandomForest
+```
+
+## 3.Data preprocessing
+
+3.1 Remove the near zero variance variables
+
+```{r}
+rm_col <- nzv(kdd) # Adopt the default parameters in this function
+print(rm_col)
+kdd_p1 <- kdd[,-rm_col] # Remove these variables returned by nzv function
+```
+
+3.2 Factor-type variables preprocessing.
+
+```{r}
+# It shows the NO. of types of service & flag are much bigger than that of protocol_type, so I suppose it's better to reduce the amount of types
+sort(table(kdd_p1$protocol_type))
+sort(table(kdd_p1$service)) 
+sort(table(kdd_p1$flag))
+```
+
+
+```{r}
+# We need to simplify the types of "service" and "flag"
+kdd_p1_id <- kdd_p1 %>% mutate(id = row_number())
+kdd_p2_id <- kdd_p1_id
+kdd_p2_id <- kdd_p2_id %>% 
+  mutate(service = as.character(service)) %>%
+  mutate(flag = as.character(flag)) %>%
+  mutate(normal = as.character(normal))
+for (a in names(which(table(kdd_p2_id$service) < 4000))) {
+  kdd_p2_id$service[kdd_p2_id$service == a] <- "OTHER"
+} # Those types with quite small values are all renamed as "OTHER" 
+for (a in names(which(table(kdd_p2_id$flag) < 500))) {
+  kdd_p2_id$flag[kdd_p2_id$flag == a] <- "OTHER"
+}
+for (a in names(which(table(kdd_p2_id$normal) < 90000))) {
+  kdd_p2_id$normal[kdd_p2_id$normal == a] <- "OTHER"
+}
+kdd_p2_id <- kdd_p2_id %>% 
+  mutate(service = as.factor(service)) %>%
+  mutate(flag = as.factor(flag)) %>%
+  mutate(normal = as.factor(normal))
+```
+
+```{r}
+sort(table(kdd_p2_id$protocol_type))
+sort(table(kdd_p2_id$service)) 
+sort(table(kdd_p2_id$flag))
+sort(table(kdd_p2_id$normal))
+# I integrated all the types with small value and now I get a satisfactory amount of types
+```
+
+```{r}
+# In this chunk we used the Dummy Variables to transform the factor-type variables to numeric-type
+kdd_DV <- kdd_p2_id[, -c(19, 20)] 
+factors <- names(kdd_DV)[sapply(kdd_DV, class) == 'factor'] # Filter out all factor variables
+formula <- as.formula(paste('~', paste(factors, collapse = '+'))) # Convert factor variable to the right half of formula
+dummy <- dummyVars(formula = formula, data = kdd_DV)
+pred <- data.frame(predict(dummy, newdata = kdd_DV))
+kdd_DV <- cbind(kdd_DV[,-c(1, 2, 3)], pred) # Combine "pred" and numeric-columns in "kdd_DV"
+kdd_DV <- cbind(kdd_DV, kdd_p2_id[, c(19, 20)]) # Add the columns: "id" and "normal"
+```
+
+## 4. Creat the Traindata and the Testdata. 
+
+4.1 Creat the Traindata  
+
+```{r}
+set.seed(11) # Specify seeds
+kdd_DV_.10 <- kdd_DV %>% sample_frac(.10) # Choose the smaller 10% dataset from the full dataset at random
+kdd_DV_.10_no_id <- kdd_DV_.10[, -34] # Remove the "id" column
+```
+
+4.2 Creat the Testdata
+
+```{r}
+testdata = anti_join(kdd_DV, kdd_DV_.10, by="id")# Use the remain dataset as the testdata
+testdata_no_id <- testdata[, -34] # Remove the "id" column
+
+set.seed(22) # Specify seeds
+testdata_no_id_.50 <- testdata_no_id %>% sample_frac(.50) # Choose the smaller 50% dataset from the full test dataset at random
+```
+
+4.3 RandomForest
+
+4.3.1 Specify the parameters(mtry and ntree) in RandomForest
+
+```{r}
+set.seed(1234)
+n <- length(names(kdd_DV_.10_no_id)) # The No. of variables in traindata
+x <- c(1:(n-1)) # Maximum n-1 variables per tree
+for (i in 1:(n-1)) {
+  mtry_fit <- randomForest(normal ~ ., data = kdd_DV_.10_no_id, mtry = i)
+  err <- mean(mtry_fit$err.rate)
+  x[i] <- err
+} # Restore the error in a vector and find the minimum
+x
+plot(x, type = "b", xlab = "mtry", ylab = "OOB Error", main = "mtry_fit")
+which.min(x)
+```
+## Don't run this chunk, needs more than 70 minutes on my computer.
+This plot is about how the "OOB Error" varies with the number of "mry".As an important part to optimize my model, I need to choose the number of variables tried at each split(tree) i.e. "mtry", such that the "OOB Error" fall to the minimal. The plot suggests that the OOB Error would be the minimal when the No. of variables tried at each split is 14. Or you can see from the result of "which.min".
+
+```{r}
+set.seed(12345)
+ntree_fit <- randomForest(normal ~ .,data = kdd_DV_.10_no_id, mtry = 14, ntree = 1000) # 1000 is large enough to get the best ntree
+plot(ntree_fit)
+```
+After specifying the value of "mtry", we now need to choose the No. of trees in the forest. Clearly we can see from the line plot, the error tends to relatively stable when "ntree" is bigger than 200. In order to reduce the time complexity, we adopt "ntree = 200".
+
+4.3.2 Train the forest in terms of the three types of protocol_type.
+
+```{r}
+rfFit <- randomForest(normal ~ .,data = kdd_DV_.10_no_id, mtry = 14, ntree = 200) # Create the forest
+print(rfFit) # View the forest's results
+```
+The only two parameters have been specified in previous chunks.
+
+## 5. Prediction
+
+5.3 Make prediction.
+
+```{r}
+# Make prediction upon the testdata_no_id_.50 and check the result
+prer <- predict(rfFit, testdata_no_id_.50)
+levels(prer) # Check the levels of the prediction to make sure it matches the levels of "testdata_no_id_.50$normal"
+```
+
+
+## 6. Confusion Matrix 
+
+```{r}
+print(confusionMatrix(prer, testdata_no_id_.50$normal))
+```
+Using Confusion Matrix to show more imformation about the accuracy of this predictive model.
+
+## 7. Something interesting: Importances of variables
+
+```{r}
+kdd_p2_no_id <- kdd_p2_id[, -20]
+
+set.seed(33)
+kdd_p2_no_id_.10 <- kdd_p2_no_id %>% sample_frac(.10)
+```
+
+```{r}
+rfimportance <- randomForest(normal ~ .,data = kdd_p2_no_id_.10) # Adopt the default parameters because we haven't done the optimization of parameters
+print(rfimportance) # View the special forest's results
+```
+
+```{r}
+Imp <- importance(rfimportance)
+varImpPlot(rfimportance) # Plot the graph of each variable.
+Imp
+```
+The larger the value, the more important the variable. So, this plot proves that all the factor-type variables are important, we didn't waste our time to use dummy variables.

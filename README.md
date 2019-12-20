@@ -17,9 +17,11 @@ Data Science Toolbox Project 3
 
 ##### 多层感知器 (Multilayer Perceptron, Cauchy)
 
-##### 支持向量机 (Supporting Vector Machine, Longlong)
+##### GBM (Gradient Boost Machine, Longlong)
 
 ##### 朴素贝叶斯 (Naive Bayes, 蒙哥)
+
+##### 随机森林（Random Forest，萌哥）
 
 
 ### 比较方法
